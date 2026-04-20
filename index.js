@@ -139,7 +139,7 @@ async function processBackup() {
     }
 
     // 6. Clean up remote files
-    await cleanupOldBackups().then(() => console.log("cleaned up backups"))
+    await cleanupOldBackups();
   }
 }
 
