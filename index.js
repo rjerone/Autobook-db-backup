@@ -214,7 +214,7 @@ if (config.cron) {
 
 if (config.run_on_startup) {
   console.log("run_on_startup enabled, backing up now...")
-  processBackup().then(() => console.log("added backup"));
+  await processBackup().then(() => console.log("added backup"));
 
-  cleanupOldBackups().then(() => console.log("cleaned up backups"))
+  await cleanupOldBackups().then(() => console.log("cleaned up backups"))
 }
