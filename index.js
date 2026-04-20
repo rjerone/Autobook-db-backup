@@ -217,7 +217,8 @@ if (config.cron) {
 }
 
 if (config.run_on_startup) {
-  console.log("run_on_startup enabled, backing up now...")
+
+  console.log(`run_on_startup enabled, ${(new Date()).toISOString()} backing up now...`)
   processBackup().then(() => console.log("all done"));
 
 
