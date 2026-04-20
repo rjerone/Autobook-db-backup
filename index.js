@@ -1,9 +1,12 @@
+
+
 require('dotenv').config();
 const util = require('util');
 const exec = util.promisify(require('child_process').exec);
 const s3 = require("@aws-sdk/client-s3");
 const fs = require('fs');
 const cron = require("cron");
+const {ListObjectsV2Command, DeleteObjectsCommand} = require("@aws-sdk/client-s3");
 
 function loadConfig() {
   const requiredEnvars = [
@@ -11,7 +14,10 @@ function loadConfig() {
     'AWS_SECRET_ACCESS_KEY',
     'AWS_S3_REGION',
     'AWS_S3_ENDPOINT',
-    'AWS_S3_BUCKET'
+    'AWS_S3_BUCKET',
+    'BACKUP_RETENTION_DAYS',
+    'BACKUP_RETENTION_WEEKS',
+    'BACKUP_RETENTION_MONTHS'
   ];
   
   for (const key of requiredEnvars) {
@@ -29,13 +35,19 @@ function loadConfig() {
       s3_bucket: process.env.AWS_S3_BUCKET
     },
     databases: process.env.DATABASES ? process.env.DATABASES.split(",") : [],
-    run_on_startup: process.env.RUN_ON_STARTUP === 'true' ? true : false,
+    run_on_startup: process.env.RUN_ON_STARTUP === 'true',
     cron: process.env.CRON,
+    retention: {
+       days:  process.env.BACKUP_RETENTION_DAYS,
+       weeks:  process.env.BACKUP_RETENTION_WEEKS,
+       months:  process.env.BACKUP_RETENTION_MONTHS,
+    }
   };
 }
 
 const config = loadConfig();
 
+// noinspection JSCheckFunctionSignatures
 const s3Client = new s3.S3Client(config.aws);
 
 async function processBackup() {
@@ -127,6 +139,71 @@ async function processBackup() {
   }
 }
 
+async function cleanupOldBackups() {
+  console.log("🧹 Cleaning up old backups...");
+
+  // 1. List all backups
+  let objects = [];
+  let continuationToken = null;
+
+  do {
+    const response = await s3Client.send(new ListObjectsV2Command({
+      Bucket: config.aws.s3_bucket,
+      ContinuationToken: continuationToken,
+    }));
+    if (response.Contents) {
+      objects = objects.concat(response.Contents);
+    }
+    continuationToken = response.NextContinuationToken;
+  } while (continuationToken);
+
+  // 2. Sort by date (newest first)
+  objects.sort((a, b) => (b.LastModified?.getTime() || 0) - (a.LastModified?.getTime() || 0));
+
+  const toDelete = [];
+  const now = new Date();
+
+  // 3. Define Retention Cutoffs
+  const dailyCutoff = new Date(now.getTime() - config.retention.days * 24 * 60 * 60 * 1000);
+  const weeklyCutoff = new Date(now.getTime() - config.retention.weeks * 7 * 24 * 60 * 60 * 1000);
+  const monthlyCutoff = new Date(now.getTime() - config.retention.months * 30 * 24 * 60 * 60 * 1000);
+
+  // 4. Filter objects to keep or delete
+  for (const obj of objects) {
+    const key = obj.Key;
+    if (!key) continue;
+
+    const date = obj.LastModified;
+    if (!date) continue;
+
+    const isSunday = date.getDay() === 0;
+    const isFirstOfMonth = date.getDate() === 1;
+
+    let keep = false;
+
+    if (date > dailyCutoff) keep = true;
+    else if (date > weeklyCutoff && isSunday) keep = true;
+    else if (date > monthlyCutoff && isFirstOfMonth) keep = true;
+
+    if (!keep) toDelete.push(key);
+  }
+
+  // 5. Delete in batches
+  if (toDelete.length > 0) {
+    console.log(`🗑️ Deleting ${toDelete.length} old backups...`);
+    for (let i = 0; i < toDelete.length; i += 1000) {
+      const batch = toDelete.slice(i, i + 1000).map(key => ({ Key: key }));
+      await s3Client.send(new DeleteObjectsCommand({
+        Bucket: config.aws.s3_bucket,
+        Delete: { Objects: batch },
+      }));
+    }
+    console.log("✅ Cleanup completed.");
+  } else {
+    console.log("✨ No backups to clean up.");
+  }
+}
+
 if (config.cron) {
   const CronJob = cron.CronJob;
   const job = new CronJob(config.cron, processBackup);
@@ -137,5 +214,7 @@ if (config.cron) {
 
 if (config.run_on_startup) {
   console.log("run_on_startup enabled, backing up now...")
-  processBackup();
+  processBackup().then(() => console.log("added backup"));
+
+  cleanupOldBackups().then(() => console.log("cleaned up backups"))
 }
