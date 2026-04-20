@@ -133,9 +133,13 @@ async function processBackup() {
 
       // 5. Clean up temporary files
       await exec(`rm -f ${filepath} ${filepath}.dump`);
+
     } catch (error) {
       console.error(`An error occurred while processing the database ${dbType} ${dbName}, host: ${dbHostname}): ${error}`,error);
     }
+
+    // 6. Clean up remote files
+    await cleanupOldBackups().then(() => console.log("cleaned up backups"))
   }
 }
 
@@ -214,7 +218,7 @@ if (config.cron) {
 
 if (config.run_on_startup) {
   console.log("run_on_startup enabled, backing up now...")
-  await processBackup().then(() => console.log("added backup"));
+  processBackup().then(() => console.log("all done"));
 
-  await cleanupOldBackups().then(() => console.log("cleaned up backups"))
+
 }
