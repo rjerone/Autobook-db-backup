@@ -2,6 +2,8 @@
 
 This script provides a simple, automated way to back up your databases to AWS S3. It supports multiple database types and can be easily configured to run on a schedule.
 
+Slightly modified by Will to prune older dumps from s3.
+
 [![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/U_wjYd?referralCode=lukeliasi)
 
 Supported databases:
